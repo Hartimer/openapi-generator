@@ -57,13 +57,64 @@ type service struct {
 	client *APIClient
 }
 
+{{#authMethods}}
+{{#isApiKey}}
+{{^isKeyInCookie}}
+// authRoundTripper is responsible for adding authentication headers or query string parameters
+// when needed. It implements the http.RoundTripper interface.
+type authRoundTripper struct {
+	next http.RoundTripper
+}
+
+// RoundTrip implements the http.RoundTripper interface
+func (a *authRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	// API Key Authentication
+	if auth, ok := req.Context().Value(ContextAPIKeys).(map[string]APIKey); ok {
+		{{#vendorExtensions.x-auth-id-alias}}
+		if apiKey, ok := auth["{{.}}"]; ok {
+			var key string
+			if prefix, ok := auth["{{name}}"]; ok && prefix.Prefix != "" {
+				key = prefix.Prefix + " " + apiKey.Key
+			} else {
+				key = apiKey.Key
+			}
+		{{/vendorExtensions.x-auth-id-alias}}
+		{{^vendorExtensions.x-auth-id-alias}}
+		if apiKey, ok := auth["{{name}}"]; ok {
+			var key string
+			if apiKey.Prefix != "" {
+				key = apiKey.Prefix + " " + apiKey.Key
+			} else {
+				key = apiKey.Key
+			}
+		{{/vendorExtensions.x-auth-id-alias}}
+			{{#isKeyInHeader}}
+			req.Header.Add("{{keyParamName}}", key)
+			{{/isKeyInHeader}}
+			{{#isKeyInQuery}}
+			req.URL.Query().Add("{{keyParamName}}", key)
+			{{/isKeyInQuery}}
+		}
+	}
+	return a.next.RoundTrip(req)
+}
+{{/isKeyInCookie}}
+{{/isApiKey}}
+{{/authMethods}}
+
 // NewAPIClient creates a new API client. Requires a userAgent string describing your application.
 // optionally a custom http.Client to allow for advanced features such as caching.
 func NewAPIClient(cfg *Configuration) *APIClient {
 	if cfg.HTTPClient == nil {
 		cfg.HTTPClient = http.DefaultClient
 	}
-
+{{#authMethods}}
+{{#isApiKey}}
+{{^isKeyInCookie}}
+	cfg.HTTPClient.Transport = &authRoundTripper{next: cfg.HTTPClient.Transport}
+{{/isKeyInCookie}}
+{{/isApiKey}}
+{{/authMethods}}
 	c := &APIClient{}
 	c.cfg = cfg
 	c.common.client = c
